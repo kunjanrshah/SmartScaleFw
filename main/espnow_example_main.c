@@ -38,6 +38,7 @@
 #include "esp_timer.h"
 #include "esp_sleep.h"
 #include "sdkconfig.h"
+#include "cJSON.h"
 
 static const char *TAG = "espnow_example";
 static xQueueHandle s_example_espnow_queue;
@@ -46,6 +47,7 @@ static uint8_t s_example_broadcast_mac[ESP_NOW_ETH_ALEN] = {0xFF, 0xFF, 0xFF, 0x
 static uint8_t rx_cmd[] = {0x0, 0x00}; //{0};
 static uint8_t *store_status = {0};
 static int n_status=21;
+static bool is_internet_connected=false;
 static bool save_status = false;
 static void example_espnow_deinit(example_espnow_send_param_t *send_param);
 
@@ -55,10 +57,37 @@ static void example_espnow_deinit(example_espnow_send_param_t *send_param);
 #include "gpio_task.h"
 #include "ota_init.h"
 #include "mqtt_server.h"
+#include "esp_tls.h"
+#include "esp_crt_bundle.h"
 
-#if CONFIG_EXAMPLE_CONNECT_WIFI
-#include "esp_wifi.h"
-#endif
+
+esp_err_t _http_event_handler(esp_http_client_event_t *evt)
+{
+    switch(evt->event_id) {
+        case HTTP_EVENT_ERROR:
+            ESP_LOGD(TAG, "HTTP_EVENT_ERROR");
+            break;
+        case HTTP_EVENT_ON_CONNECTED:
+            ESP_LOGD(TAG, "HTTP_EVENT_ON_CONNECTED");
+            break;
+        case HTTP_EVENT_ON_FINISH:
+            ESP_LOGD(TAG, "HTTP_EVENT_ON_FINISH");            
+            break;
+        case HTTP_EVENT_DISCONNECTED:
+            ESP_LOGI(TAG, "HTTP_EVENT_DISCONNECTED");
+            break;
+        case HTTP_EVENT_HEADER_SENT:
+            ESP_LOGD(TAG, "HTTP_EVENT_HEADER_SENT");
+            break;
+        case HTTP_EVENT_ON_HEADER:
+            ESP_LOGD(TAG, "HTTP_EVENT_ON_HEADER, key=%s, value=%s", evt->header_key, evt->header_value);
+            break;
+        case HTTP_EVENT_ON_DATA:
+            ESP_LOGD(TAG, "HTTP_EVENT_ON_DATA, len=%d", evt->data_len);
+            break;
+    }
+    return ESP_OK;
+}
 
 /* ESPNOW sending or receiving callback function is called in WiFi task.
  * Users should not do lengthy operations from this task. Instead, post
@@ -163,6 +192,162 @@ int example_espnow_data_parse(example_espnow_send_param_t *send_param, uint8_t *
     return 0;
 }
 
+// Create array
+cJSON *Create_array(cJSON **objects,int array_num)
+{
+	cJSON *prev = 0;
+	cJSON *root;
+	root = cJSON_CreateArray();
+	for (int i=0;i<array_num;i++) {
+		if (!i)	{
+			root->child=objects[i];
+		} else {
+			prev->next=objects[i];
+			objects[i]->prev=prev;
+		}
+		prev=objects[i];
+	}
+	return root;
+}
+
+// Create array
+cJSON *Create_array1(cJSON **objects1,int array_num)
+{
+	cJSON *prev = 0;
+	cJSON *root;
+	root = cJSON_CreateArray();
+	for (int i=0;i<array_num;i++) {
+		if (!i)	{
+			root->child=objects1[i];
+		} else {
+			prev->next=objects1[i];
+			objects1[i]->prev=prev;
+		}
+		prev=objects1[i];
+	}
+	return root;
+}
+
+
+static void http_store_unit_task(void *pvParameters)
+{
+    uint8_t *unit_param  = (uint8_t *)pvParameters;
+    cJSON *root,*array;
+    root = cJSON_CreateObject();
+	array = cJSON_CreateArray();
+
+    int n=0;
+    for (int i = 0; i < 8; i=i+2)
+    {
+       if(unit_param[i]!=0){
+           n++;
+       } 
+    }
+    ESP_LOGE(TAG, "n of objects: %d", n);
+    cJSON *objects[n];
+    for(int i=0;i<n;i++) {
+		objects[i] = cJSON_CreateObject();
+	}
+    
+     array = Create_array(objects, n);
+    
+    for (int i=0,j=0;j<n;j++,i=i+2) {
+		cJSON_AddNumberToObject(objects[j], "device_id", unit_param[i]);
+		cJSON_AddNumberToObject(objects[j], "unit", unit_param[i+1]);
+	}
+    cJSON_AddItemToObject(root, "units", array);
+	const char *my_json_string = cJSON_Print(root);
+	ESP_LOGI(TAG, "my_json_string\n%s",my_json_string);
+	cJSON_Delete(root);
+
+    esp_http_client_config_t config = {
+        .url = "http://www.superbinstruments.com/units_data.php",
+        .method= HTTP_METHOD_POST,
+        .event_handler = _http_event_handler,
+    };
+    esp_http_client_handle_t client = esp_http_client_init(&config);
+
+//  {"units":[{"device_id":1,"unit": 11}, {"device_id":2,"unit": 22}, {"device_id":3,"unit": 34}, {"device_id":4,"unit": 45}] }
+    
+    esp_http_client_set_header(client, "Content-Type", "application/json");
+    esp_http_client_set_post_field(client, my_json_string, strlen(my_json_string));
+    esp_err_t err = esp_http_client_perform(client);
+    if (err == ESP_OK) {
+        ESP_LOGI(TAG, "HTTP POST Status = %d, content_length = %lld",
+                esp_http_client_get_status_code(client),
+                esp_http_client_get_content_length(client));
+    } else {
+        ESP_LOGE(TAG, "HTTP POST request failed: %s", esp_err_to_name(err));
+    }
+
+    esp_http_client_cleanup(client);
+    vTaskDelete(NULL);
+}
+
+static void http_store_keys_task(void *pvParameters)
+{
+   //  {"keys":[{"device_id":1,"switch":[{"switch_id": 1,"status": 0},{"switch_id": 2,"status": 0}]}, {"device_id":2,"switch":[{"switch_id": 1,"status": 1},{"switch_id": 2,"status": 1}]},{"device_id":3,"switch":[{"switch_id": 3,"status": 0}]}] } 
+    uint8_t *keys_param  = (uint8_t *)pvParameters;
+    cJSON *root,*array;
+    root = cJSON_CreateObject();
+	array = cJSON_CreateArray();
+
+    cJSON *objects[4];
+    for(int i=0;i<4;i++) {
+		objects[i] = cJSON_CreateObject();
+	}
+    
+    array = Create_array(objects, 4);
+    
+    for (int j=0,i=0;j<4;j++,i=i+9) {   
+        if(keys_param[i] != 0){
+        cJSON_AddNumberToObject(objects[j], "device_id", keys_param[i]);
+
+        cJSON *objects1[4];
+        for(int z=0;z<4;z++) {
+            objects1[z] = cJSON_CreateObject();
+        }
+        cJSON *array1;
+        array1 = cJSON_CreateArray();
+        array1 = Create_array1(objects1, 4);
+
+        for (int k=i+1,x=0;k<i+8;k=k+2,x++) {
+            if(keys_param[k] != 0){
+                cJSON_AddNumberToObject(objects1[x], "switch_id", keys_param[k]);
+		        cJSON_AddNumberToObject(objects1[x], "status", keys_param[k+1]);
+            }
+	    }
+         cJSON_AddItemToObject(objects[j], "switch",array1);
+        }	
+	 }
+
+     cJSON_AddItemToObject(root, "keys", array);
+	 const char *my_json_string = cJSON_Print(root);
+     ESP_LOGI(TAG, "my_json_string\n%s",my_json_string);
+	 cJSON_Delete(root);
+
+    esp_http_client_config_t config = {
+        .url = "http://www.superbinstruments.com/keys_data.php",
+        .method= HTTP_METHOD_POST,
+        .event_handler = _http_event_handler,
+    };
+    esp_http_client_handle_t client = esp_http_client_init(&config);
+    
+    esp_http_client_set_header(client, "Content-Type", "application/json");
+    esp_http_client_set_post_field(client, my_json_string, strlen(my_json_string));
+    esp_err_t err = esp_http_client_perform(client);
+    if (err == ESP_OK) {
+        ESP_LOGI(TAG, "HTTP POST Status = %d, content_length = %lld",
+                esp_http_client_get_status_code(client),
+                esp_http_client_get_content_length(client));
+    } else {
+        ESP_LOGE(TAG, "HTTP POST request failed: %s", esp_err_to_name(err));
+    }
+
+    esp_http_client_cleanup(client);
+    vTaskDelete(NULL);
+}
+
 /* Prepare ESPNOW data to be sent. */
 void example_espnow_data_prepare(example_espnow_send_param_t *send_param)
 {
@@ -225,8 +410,6 @@ void example_espnow_data_prepare(example_espnow_send_param_t *send_param)
                 buf->seq_status[++i] = 254;
                 buf->seq_status[++i] = 0;
                 buf->seq_status[++i] = 0;
-                //i++;
-                //i++;
             }
             dev_id++;
         }
@@ -283,8 +466,7 @@ void example_espnow_data_prepare(example_espnow_send_param_t *send_param)
                     }
                 }
                 else
-                {
-                    //TODO: Get Hardware Status
+                { 
                     buf->seq_status[i + 4] = store_status[i + 4];
                     if (rx_cmd[0] != 0)
                     {
@@ -315,16 +497,84 @@ void example_espnow_data_prepare(example_espnow_send_param_t *send_param)
         }
     }
 
-    save_status = false;
     for (int i = 0; i < n_status; i++)
     {
-        if (store_status[i] != buf->seq_status[i])
-        {
-            save_status = true;
-            break;
-        }
+        ESP_LOGI(TAG, "%d, %d",store_status[i],buf->seq_status[i]);
     }
 
+    save_status = false;
+    if(is_internet_connected){
+        bool is_diff=true;
+        // uint8_t *send_units={0};
+        bool is_diff_key=true;
+        uint8_t *send_keys={0};
+        
+        buf->seq_status[5]=5;
+        buf->seq_status[10]=15;
+        buf->seq_status[15]=33;
+        buf->seq_status[20]=14;
+
+        for (int i = 2,j=-1,k=5,x=-1; i < n_status; i=i+5,k=k+5)
+        {
+            // if(store_status[i] != buf->seq_status[i]){
+            //     if(is_diff){
+            //         is_diff=false;
+            //         send_units =(uint8_t *) calloc(8, sizeof(uint8_t));   
+            //     }     
+            //     send_units[++j]=buf->seq_status[i-1];
+            //     send_units[++j]=buf->seq_status[i];
+            // }
+            
+            if(store_status[k] != buf->seq_status[k]){
+                if(is_diff_key){
+                    is_diff_key=false;
+                    send_keys =(uint8_t *) calloc(40, sizeof(uint8_t));   
+                }   
+
+                send_keys[++x]=buf->seq_status[k-4];
+                for(int y=1; y<5; y++){
+
+                    ESP_LOGI(TAG, "get store_status Bit %d",getBit(store_status[k],y-1));
+                    ESP_LOGI(TAG, "get buf status: %d",getBit(buf->seq_status[k],y-1));                    
+                    
+                       if(getBit(store_status[k],y-1)!=getBit(buf->seq_status[k],y-1)){
+                        send_keys[++x]=y;
+                        send_keys[++x]=getBit(buf->seq_status[k],y-1);
+                       }else{
+                        send_keys[++x]=0;
+                        send_keys[++x]=0;
+                       } 
+                }                
+            }
+        }
+        // if(is_diff ==false || is_diff_key==false){
+        //         save_status = true;
+        // }
+           
+        for (int i = 0; i < 20; i++)
+        {
+                ESP_LOGI(TAG, "send_keys %d",send_keys[i]);
+        }   
+        // if(!is_diff){
+        //     //POST Call request param -> device_id,units
+        //     xTaskCreate(http_store_unit_task, "http_store_unit_task", 8192, send_units, 5, NULL);
+        // }
+        if(!is_diff_key){
+            //POST Call request param -> swtich_id,status
+            xTaskCreate(http_store_keys_task, "http_store_keys_task", 8192, send_keys, 5, NULL);
+        }
+        
+    }else{
+            for (int i = 0; i < n_status; i++)
+            {
+                if (store_status[i] != buf->seq_status[i])
+                {
+                   // save_status = true;
+                    break;
+                }
+            }
+     }
+    
     if (save_status)
     {
         for (int i = 0; i < n_status; i++)
@@ -333,10 +583,7 @@ void example_espnow_data_prepare(example_espnow_send_param_t *send_param)
         }
     }
     ESP_LOGI(TAG, "ESPNOW Sending...");
-    // for (int i = 0; i < n_status; i++)
-    // {
-    //     ESP_LOGI(TAG, "Sending Status: %d, %d ",store_status[i], buf->seq_status[i]);
-    // }
+    
     // for (int i = 0; i < n_status; i++)
     // {
     //     // send_param->seq_status[i] = buf->seq_status[i];
@@ -601,7 +848,7 @@ static void init_station_mqtt_server(void *pvParameters)
 
             vTaskDelay(15000 / portTICK_PERIOD_MS);
             example_espnow_init(0,EXAMPLE_ESP_WIFI_CHANNEL);
-            mqtt_app_start();
+            //mqtt_app_start();
         }
     }
     vTaskDelete(NULL);

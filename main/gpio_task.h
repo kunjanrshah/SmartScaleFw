@@ -48,7 +48,8 @@ static void echo_task(void *arg)
     char saved_units_arr[5] =  {'0','0','0','0','\0'}; 
     char switches_arr[3] = {'0','0','\0'};
     char saved_switches_arr[3] = {'0','0','\0'};
-    char kwatts[5] =  {'0','0','0','0','\0'};
+    char kwatts[9] =  {'0','0','0','0','0','0','0','0','\0'};
+    char amps[5] =  {'0','0','0','0','\0'};
 
     vTaskDelay(10000 / portTICK_PERIOD_MS);
     int switch_pos=0,units_pos=0,kwatt_pos=0;
@@ -81,6 +82,17 @@ static void echo_task(void *arg)
             kwatts[1]= (char) data[7];
             kwatts[2]= (char) data[8];
             kwatts[3]= (char) data[9];
+            kwatts[4]= (char) data[10];
+            kwatts[5]= (char) data[11];
+            kwatts[6]= (char) data[12];
+            kwatts[7]= (char) data[13];
+            
+            amps[0]= (char) data[14];
+            amps[1]= (char) data[15];
+            amps[2]= (char) data[16];
+            amps[3]= (char) data[17];
+
+
 
             int switch_val=0;
             sscanf(switches_arr, "%d", &switch_val);
@@ -91,7 +103,10 @@ static void echo_task(void *arg)
             int kwatts_val=0;
             sscanf(kwatts, "%d", &kwatts_val);
 
-            printf("switch_val: %d , unit_val: %d, kwatts_val: %d \n", switch_val, unit_val, kwatts_val);
+            int amp_val=0;
+            sscanf(amps, "%d", &amp_val);
+
+            printf("switch_val: %d , unit_val: %d, kwatts_val: %d , amp_val: %d \n", switch_val, unit_val,kwatts_val, amp_val);
             store_status[kwatt_pos]=kwatts_val;  
             saved_data= getMS51StatusFromMemory();
             
@@ -120,7 +135,7 @@ static void echo_task(void *arg)
                     store_status[units_pos]=unit_val;
             }
              
-         vTaskDelay(2000 / portTICK_PERIOD_MS);
+         vTaskDelay(5000 / portTICK_PERIOD_MS);
         }
         vTaskDelete(NULL);
         free(data);
@@ -175,7 +190,7 @@ void gpio_init()
     //configure GPIO with the given settings
     gpio_config(&io_conf);
 
-   // xTaskCreate(echo_task, "uart_echo_task", 4096, NULL, 10, NULL);
+  //  xTaskCreate(echo_task, "uart_echo_task", 4096, NULL, 10, NULL);
 
 }
 
