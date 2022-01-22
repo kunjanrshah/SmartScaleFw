@@ -78,7 +78,7 @@
 #define PORT CONFIG_EXAMPLE_PORT
 
 static const char *TAG = "example";
-
+static bool is_connected=0;
 
 /**************************** end wifi init *******************************/
 
@@ -825,10 +825,9 @@ static void gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_
 
         // Write data back to the UART
         // uart_write_bytes(UART_NUM_1, (const char *) data_new, len);
-        if (can_send_notify == true && len!=0)
-        {           uint8_t indicate_data[len+1];
-                    esp_ble_gatts_send_indicate(gatts_if_notifi, perm_notifi, gl_profile_tab[PROFILE_A_APP_ID].char_handle,
-                                                sizeof(indicate_data), data, false);
+        if (can_send_notify == true && len!=0){           
+            
+            esp_ble_gatts_send_indicate(gatts_if_notifi, perm_notifi, gl_profile_tab[PROFILE_A_APP_ID].char_handle,7, data, false);
 
                  /*
                    [in] gatts_if: GATT server access interface
@@ -857,84 +856,95 @@ static void gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_
 
 /*********************************************** for wifi code start *********************************/
 
-static void wifi_event_handler(void* arg, esp_event_base_t event_base,
-                                    int32_t event_id, void* event_data)
+// static void do_retransmit(const int sock)
+// {
+//     int len=0;
+//     char rx_buffer[128];
+    
+//     do {
+
+//         len=sizeof(data_new);
+//         int to_write= len;
+//         int written = send(sock, data_new + (len - to_write), to_write, 0);
+//                 if (written < 0) {
+//                     ESP_LOGE(TAG, "Error occurred during sending: errno %d", errno);
+//                 }
+//             to_write -= written;
+
+
+//         // len = recv(sock, rx_buffer, sizeof(rx_buffer) - 1, 0);
+//         // if (len < 0) {
+//         //     ESP_LOGE(TAG, "Error occurred during receiving: errno %d", errno);
+//         // } else if (len == 0) {
+//         //     ESP_LOGW(TAG, "Connection closed");
+//         // } else {
+//         //     rx_buffer[len] = 0; // Null-terminate whatever is received and treat it like a string
+//         //     ESP_LOGI(TAG, "Received %d bytes: %s", len, rx_buffer);
+
+
+
+
+
+//         //     // send() can return less bytes than supplied length.
+//         //     // Walk-around for robust implementation.
+//         //     int to_write = len;
+//         //     while (to_write > 0) {
+//         //         int written = send(sock, rx_buffer + (len - to_write), to_write, 0);
+//         //         if (written < 0) {
+//         //             ESP_LOGE(TAG, "Error occurred during sending: errno %d", errno);
+//         //         }
+//         //         to_write -= written;
+//         //     }
+//         // }
+//     } while (len > 0);
+// }
+
+static void send_task(void *pvParameters)
 {
-    if (event_id == WIFI_EVENT_AP_STACONNECTED) {
-        wifi_event_ap_staconnected_t* event = (wifi_event_ap_staconnected_t*) event_data;
-        ESP_LOGI(TAG, "station "MACSTR" join, AID=%d",
-                 MAC2STR(event->mac), event->aid);
-    } else if (event_id == WIFI_EVENT_AP_STADISCONNECTED) {
-        wifi_event_ap_stadisconnected_t* event = (wifi_event_ap_stadisconnected_t*) event_data;
-        ESP_LOGI(TAG, "station "MACSTR" leave, AID=%d",
-                 MAC2STR(event->mac), event->aid);
+    int sock = (int)pvParameters;
+    while (sizeof(data_new) > 0 && is_connected==1)
+    {
+        vTaskDelay(500 / portTICK_RATE_MS);
+        //ESP_LOGE(TAG, "kunjan...");
+
+        int written = send(sock,(char *) data_new, 7, 0);
+        if (written < 0){
+            ESP_LOGE(TAG, "Error occurred during sending: errno %d", errno);
+        }
     }
+    
+    shutdown(sock, 0);
+    close(sock);
+     
+     vTaskDelete(NULL);
+
 }
 
-void wifi_init_softap(void)
+static void receive_task(void *pvParameters)
 {
-    ESP_ERROR_CHECK(esp_netif_init());
-    ESP_ERROR_CHECK(esp_event_loop_create_default());
-    esp_netif_create_default_wifi_ap();
+    int sock = (int)pvParameters;
 
-    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
-
-    ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT,
-                                                        ESP_EVENT_ANY_ID,
-                                                        &wifi_event_handler,
-                                                        NULL,
-                                                        NULL));
-
-    wifi_config_t wifi_config = {
-        .ap = {
-            .ssid = EXAMPLE_ESP_WIFI_SSID,
-            .ssid_len = strlen(EXAMPLE_ESP_WIFI_SSID),
-            .channel = EXAMPLE_ESP_WIFI_CHANNEL,
-            .password = EXAMPLE_ESP_WIFI_PASS,
-            .max_connection = EXAMPLE_MAX_STA_CONN,
-            .authmode = WIFI_AUTH_WPA_WPA2_PSK
-        },
-    };
-    if (strlen(EXAMPLE_ESP_WIFI_PASS) == 0) {
-        wifi_config.ap.authmode = WIFI_AUTH_OPEN;
-    }
-
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
-    ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_AP, &wifi_config));
-    ESP_ERROR_CHECK(esp_wifi_start());
-
-    ESP_LOGI(TAG, "wifi_init_softap finished. SSID:%s password:%s channel:%d",
-             EXAMPLE_ESP_WIFI_SSID, EXAMPLE_ESP_WIFI_PASS, EXAMPLE_ESP_WIFI_CHANNEL);
-}
-
-static void do_retransmit(const int sock)
-{
     int len;
     char rx_buffer[128];
-
-    do {
+    do
+    {
         len = recv(sock, rx_buffer, sizeof(rx_buffer) - 1, 0);
-        if (len < 0) {
+        if (len < 0)
+        {
             ESP_LOGE(TAG, "Error occurred during receiving: errno %d", errno);
-        } else if (len == 0) {
+        }
+        else if (len == 0)
+        {
             ESP_LOGW(TAG, "Connection closed");
-        } else {
+        }
+        else
+        {
             rx_buffer[len] = 0; // Null-terminate whatever is received and treat it like a string
             ESP_LOGI(TAG, "Received %d bytes: %s", len, rx_buffer);
-
-            // send() can return less bytes than supplied length.
-            // Walk-around for robust implementation.
-            int to_write = len;
-            while (to_write > 0) {
-                int written = send(sock, rx_buffer + (len - to_write), to_write, 0);
-                if (written < 0) {
-                    ESP_LOGE(TAG, "Error occurred during sending: errno %d", errno);
-                }
-                to_write -= written;
-            }
+            uart_write_bytes(UART_NUM_1, rx_buffer, 2);
         }
     } while (len > 0);
+     vTaskDelete(NULL);
 }
 
 static void tcp_server_task(void *pvParameters)
@@ -1008,10 +1018,11 @@ static void tcp_server_task(void *pvParameters)
         }
         ESP_LOGI(TAG, "Socket accepted ip address: %s", addr_str);
 
-        do_retransmit(sock);
-
-        shutdown(sock, 0);
-        close(sock);
+       // do_retransmit(sock);
+        xTaskCreate(&send_task, "send_task", 2048, (void *)sock, 4, NULL);
+        xTaskCreate(&receive_task, "receive_task", 2048, (void *)sock, 4, NULL);
+      //  shutdown(sock, 0);
+      //  close(sock);
     }
 
 CLEAN_UP:
@@ -1019,6 +1030,59 @@ CLEAN_UP:
     vTaskDelete(NULL);
 }
 
+static void wifi_event_handler(void* arg, esp_event_base_t event_base,
+                                    int32_t event_id, void* event_data)
+{
+    if (event_id == WIFI_EVENT_AP_STACONNECTED) {
+        wifi_event_ap_staconnected_t* event = (wifi_event_ap_staconnected_t*) event_data;
+        ESP_LOGI(TAG, "station "MACSTR" join, AID=%d",MAC2STR(event->mac), event->aid);
+        is_connected=1;
+         xTaskCreate(tcp_server_task, "tcp_server", 4096, (void*)AF_INET, 5, NULL);
+         
+    } else if (event_id == WIFI_EVENT_AP_STADISCONNECTED) {
+        is_connected=0;
+        wifi_event_ap_stadisconnected_t* event = (wifi_event_ap_stadisconnected_t*) event_data;
+        ESP_LOGI(TAG, "station "MACSTR" leave, AID=%d",
+                 MAC2STR(event->mac), event->aid);
+    }
+}
+
+void wifi_init_softap(void)
+{
+    ESP_ERROR_CHECK(esp_netif_init());
+    ESP_ERROR_CHECK(esp_event_loop_create_default());
+    esp_netif_create_default_wifi_ap();
+
+    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
+
+    ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT,
+                                                        ESP_EVENT_ANY_ID,
+                                                        &wifi_event_handler,
+                                                        NULL,
+                                                        NULL));
+
+    wifi_config_t wifi_config = {
+        .ap = {
+            .ssid = EXAMPLE_ESP_WIFI_SSID,
+            .ssid_len = strlen(EXAMPLE_ESP_WIFI_SSID),
+            .channel = EXAMPLE_ESP_WIFI_CHANNEL,
+            .password = EXAMPLE_ESP_WIFI_PASS,
+            .max_connection = EXAMPLE_MAX_STA_CONN,
+            .authmode = WIFI_AUTH_WPA_WPA2_PSK
+        },
+    };
+    if (strlen(EXAMPLE_ESP_WIFI_PASS) == 0) {
+        wifi_config.ap.authmode = WIFI_AUTH_OPEN;
+    }
+
+    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
+    ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_AP, &wifi_config));
+    ESP_ERROR_CHECK(esp_wifi_start());
+
+    ESP_LOGI(TAG, "wifi_init_softap finished. SSID:%s password:%s channel:%d",
+             EXAMPLE_ESP_WIFI_SSID, EXAMPLE_ESP_WIFI_PASS, EXAMPLE_ESP_WIFI_CHANNEL);
+}
 
 /*********************************************** End wifi code   *************************************/
 
@@ -1044,12 +1108,12 @@ void app_main(void)
      */
     //ESP_ERROR_CHECK(example_connect());
 
-    #ifdef CONFIG_EXAMPLE_IPV4
-        xTaskCreate(tcp_server_task, "tcp_server", 4096, (void*)AF_INET, 5, NULL);
-    #endif
-    #ifdef CONFIG_EXAMPLE_IPV6
-        xTaskCreate(tcp_server_task, "tcp_server", 4096, (void*)AF_INET6, 5, NULL);
-    #endif
+    // #ifdef CONFIG_EXAMPLE_IPV4
+    //     xTaskCreate(tcp_server_task, "tcp_server", 4096, (void*)AF_INET, 5, NULL);
+    // #endif
+    // #ifdef CONFIG_EXAMPLE_IPV6
+    //     xTaskCreate(tcp_server_task, "tcp_server", 4096, (void*)AF_INET6, 5, NULL);
+    // #endif
 
 	/******************************for wifi end***************************************/
     xTaskCreate(echo_task, "uart_echo_task", 1024, NULL, 10, NULL);
