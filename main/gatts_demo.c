@@ -490,8 +490,8 @@ static void gatts_profile_a_event_handler(esp_gatts_cb_event_t event, esp_gatt_i
                             indicate_data[i] = data_new[i];
                         }
                         //the size of indicate_data[] need less than MTU size
-                        esp_ble_gatts_send_indicate(gatts_if, param->write.conn_id, gl_profile_tab[PROFILE_A_APP_ID].char_handle,
-                                                sizeof(indicate_data), indicate_data, true);
+                        // esp_ble_gatts_send_indicate(gatts_if, param->write.conn_id, gl_profile_tab[PROFILE_A_APP_ID].char_handle,
+                        //                         sizeof(indicate_data), indicate_data, true);
                     }
                 }
                 else if (descr_value == 0x0000){
@@ -593,6 +593,7 @@ static void gatts_profile_a_event_handler(esp_gatts_cb_event_t event, esp_gatt_i
     }
     case ESP_GATTS_DISCONNECT_EVT:
         ESP_LOGI(GATTS_TAG, "ESP_GATTS_DISCONNECT_EVT, disconnect reason 0x%x", param->disconnect.reason);
+        can_send_notify=false;
         esp_ble_gap_start_advertising(&adv_params);
         break;
     case ESP_GATTS_CONF_EVT:
@@ -655,8 +656,8 @@ static void gatts_profile_b_event_handler(esp_gatts_cb_event_t event, esp_gatt_i
                             notify_data[i] = i%0xff;
                         }
                         //the size of notify_data[] need less than MTU size
-                        esp_ble_gatts_send_indicate(gatts_if, param->write.conn_id, gl_profile_tab[PROFILE_B_APP_ID].char_handle,
-                                                sizeof(notify_data), notify_data, false);
+                        // esp_ble_gatts_send_indicate(gatts_if, param->write.conn_id, gl_profile_tab[PROFILE_B_APP_ID].char_handle,
+                        //                         sizeof(notify_data), notify_data, false);
                     }
                 }else if (descr_value == 0x0002){
                         if (b_property & ESP_GATT_CHAR_PROP_BIT_INDICATE){
@@ -667,8 +668,8 @@ static void gatts_profile_b_event_handler(esp_gatts_cb_event_t event, esp_gatt_i
                             indicate_data[i] = i%0xff;
                         }
                         //the size of indicate_data[] need less than MTU size
-                        esp_ble_gatts_send_indicate(gatts_if, param->write.conn_id, gl_profile_tab[PROFILE_B_APP_ID].char_handle,
-                                                sizeof(indicate_data), indicate_data, true);
+                        // esp_ble_gatts_send_indicate(gatts_if, param->write.conn_id, gl_profile_tab[PROFILE_B_APP_ID].char_handle,
+                        //                         sizeof(indicate_data), indicate_data, true);
                     }
                 }
                 else if (descr_value == 0x0000){
@@ -851,7 +852,7 @@ static void gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_
 
 
     }
-
+    vTaskDelete(NULL);
 }
 
 /*********************************************** for wifi code start *********************************/
@@ -905,7 +906,7 @@ static void send_task(void *pvParameters)
     while (sizeof(data_new) > 0 && is_connected==1)
     {
         vTaskDelay(500 / portTICK_RATE_MS);
-        //ESP_LOGE(TAG, "kunjan...");
+//        ESP_LOGE(TAG, "kunjan... %p", (void*)data_new);
 
         int written = send(sock,(char *) data_new, 7, 0);
         if (written < 0){
@@ -936,6 +937,7 @@ static void receive_task(void *pvParameters)
         else if (len == 0)
         {
             ESP_LOGW(TAG, "Connection closed");
+            is_connected=0;
         }
         else
         {
