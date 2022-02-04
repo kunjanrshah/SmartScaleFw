@@ -1,19 +1,3 @@
-/*
-   This example code is in the Public Domain (or CC0 licensed, at your option.)
-
-   Unless required by applicable law or agreed to in writing, this
-   software is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
-   CONDITIONS OF ANY KIND, either express or implied.
-*/
-
-/****************************************************************************
-*
-* This demo showcases BLE GATT server. It can send adv data, be connected by client.
-* Run the gatt_client demo, the client demo will automatically connect to the gatt_server demo.
-* Client demo will enable gatt_server's notify after connection. The two devices will then exchange
-* data.
-*
-****************************************************************************/
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -24,28 +8,14 @@
 #include "esp_log.h"
 #include "nvs_flash.h"
 #include "esp_bt.h"
-
 #include "esp_gap_ble_api.h"
 #include "esp_gatts_api.h"
 #include "esp_bt_defs.h"
 #include "esp_bt_main.h"
 #include "esp_gatt_common_api.h"
-
-
 #include "driver/uart.h"
 #include "driver/gpio.h"
 #include "sdkconfig.h"
-
-/**************************** for wifi *************************************/
-/* BSD Socket API Example
-
-   This example code is in the Public Domain (or CC0 licensed, at your option.)
-
-   Unless required by applicable law or agreed to in writing, this
-   software is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
-   CONDITIONS OF ANY KIND, either express or implied.
-*/
-
 #include <sys/param.h>
 #include "esp_wifi.h"
 #include "esp_event.h"
@@ -57,42 +27,22 @@
 #include "lwip/sys.h"
 #include <lwip/netdb.h>
 
-/* The examples use WiFi configuration that you can set via project configuration menu.
 
-   If you'd rather not, just change the below entries to strings with
-   the config you want - ie #define EXAMPLE_WIFI_SSID "mywifissid"
-*/
+#define CONFIG_ESP_WIFI_SSID "AnandRaman"
+#define CONFIG_ESP_WIFI_PASSWORD "kunjan@123"
+#define EXAMPLE_ESP_WIFI_AP_SSID   "SuperbScale"   
+#define EXAMPLE_ESP_WIFI_AP_PASS   "superb@123"
 
-
-#define CONFIG_ESP_WIFI_SSID "Helix-001"
-#define CONFIG_ESP_WIFI_PASSWORD "123456789"
-#define CONFIG_ESP_WIFI_CHANNEL 1
-
-#define CONFIG_ESP_MAX_STA_CONN 4
+#define CONFIG_ESP_MAX_STA_CONN 10
 #define EXAMPLE_ESP_WIFI_SSID      CONFIG_ESP_WIFI_SSID
 #define EXAMPLE_ESP_WIFI_PASS      CONFIG_ESP_WIFI_PASSWORD
 #define EXAMPLE_ESP_WIFI_CHANNEL   CONFIG_ESP_WIFI_CHANNEL
 #define EXAMPLE_MAX_STA_CONN       CONFIG_ESP_MAX_STA_CONN
 
-
 #define PORT CONFIG_EXAMPLE_PORT
 
-static const char *TAG = "example";
+static const char *TAG = "SmartScale";
 static bool is_connected=0;
-
-/**************************** end wifi init *******************************/
-
-/**
- * This is an example which echos any data it receives on UART1 back to the sender,
- * with hardware flow control turned off. It does not use UART driver event queue.
- *
- * - Port: UART1
- * - Receive (Rx) buffer: on
- * - Transmit (Tx) buffer: off
- * - Flow control: off
- * - Event queue: off
- * - Pin assignment: see defines below
- */
 
 #define ECHO_TEST_TXD  (GPIO_NUM_17)
 #define ECHO_TEST_RXD  (GPIO_NUM_16)
@@ -101,8 +51,9 @@ static bool is_connected=0;
 
 #define BUF_SIZE (1024)
 
-#define GATTS_TAG "HELIX_DEMO"
-
+#define GATTS_TAG "SmartScaleBLE"
+/* FreeRTOS event group to signal when we are connected & ready to make a request */
+static EventGroupHandle_t s_wifi_event_group;
 ///Declare the static function
 static void gatts_profile_a_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_ble_gatts_cb_param_t *param);
 static void gatts_profile_b_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_ble_gatts_cb_param_t *param);
@@ -117,7 +68,7 @@ static void gatts_profile_b_event_handler(esp_gatts_cb_event_t event, esp_gatt_i
 #define GATTS_DESCR_UUID_TEST_B     0x2222
 #define GATTS_NUM_HANDLE_TEST_B     4
 
-#define TEST_DEVICE_NAME            "HELIX-01"
+#define TEST_DEVICE_NAME            "Superb-01"
 #define TEST_MANUFACTURER_DATA_LEN  17
 
 #define GATTS_DEMO_CHAR_VAL_LEN_MAX 0x40
@@ -131,7 +82,7 @@ static esp_gatt_char_prop_t a_property = 0;
 static esp_gatt_char_prop_t b_property = 0;
 
 static bool can_send_notify = false;
-
+static bool is_internet_connected=false;
 
 #if (CONFIG_EXAMPLE_GATTS_NOTIFY_THROUGHPUT)
 #define GATTS_NOTIFY_LEN    490
@@ -806,18 +757,7 @@ static void gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_
 
     // Configure a temporary buffer for the incoming data
     uint8_t *data = (uint8_t *) malloc(BUF_SIZE);
-    //*data = (uint8_t *) malloc(BUF_SIZE);
-
-
-    // for (int i = 0; i < len; i++) {
-    //             //printf("0x%.2X ", (uint8_t)data[i]);
-    //             //uart_write_bytes(uart_num, (const char*)&data[i], 1);
-    //             // Add a Newline character if you get a return charater from paste (Paste tests multibyte receipt/buffer)
-    //             data_new[i] =data[i];
-
-    //         }
-
-
+   
     while (1) {
 
         // Read data from the UART
@@ -841,64 +781,9 @@ static void gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_
                    */
         }
 
-		/* int to_write = len;
-            while (to_write > 0) {
-                int written = send(0, data_new + (len - to_write), to_write, 0);
-                if (written < 0) {
-                    ESP_LOGE(TAG, "Error occurred during sending: errno %d", errno);
-                }
-                to_write -= written;
-            } */
-
-
     }
     vTaskDelete(NULL);
 }
-
-/*********************************************** for wifi code start *********************************/
-
-// static void do_retransmit(const int sock)
-// {
-//     int len=0;
-//     char rx_buffer[128];
-    
-//     do {
-
-//         len=sizeof(data_new);
-//         int to_write= len;
-//         int written = send(sock, data_new + (len - to_write), to_write, 0);
-//                 if (written < 0) {
-//                     ESP_LOGE(TAG, "Error occurred during sending: errno %d", errno);
-//                 }
-//             to_write -= written;
-
-
-//         // len = recv(sock, rx_buffer, sizeof(rx_buffer) - 1, 0);
-//         // if (len < 0) {
-//         //     ESP_LOGE(TAG, "Error occurred during receiving: errno %d", errno);
-//         // } else if (len == 0) {
-//         //     ESP_LOGW(TAG, "Connection closed");
-//         // } else {
-//         //     rx_buffer[len] = 0; // Null-terminate whatever is received and treat it like a string
-//         //     ESP_LOGI(TAG, "Received %d bytes: %s", len, rx_buffer);
-
-
-
-
-
-//         //     // send() can return less bytes than supplied length.
-//         //     // Walk-around for robust implementation.
-//         //     int to_write = len;
-//         //     while (to_write > 0) {
-//         //         int written = send(sock, rx_buffer + (len - to_write), to_write, 0);
-//         //         if (written < 0) {
-//         //             ESP_LOGE(TAG, "Error occurred during sending: errno %d", errno);
-//         //         }
-//         //         to_write -= written;
-//         //     }
-//         // }
-//     } while (len > 0);
-// }
 
 static void send_task(void *pvParameters)
 {
@@ -1020,7 +905,6 @@ static void tcp_server_task(void *pvParameters)
         }
         ESP_LOGI(TAG, "Socket accepted ip address: %s", addr_str);
 
-       // do_retransmit(sock);
         xTaskCreate(&send_task, "send_task", 2048, (void *)sock, 4, NULL);
         xTaskCreate(&receive_task, "receive_task", 2048, (void *)sock, 4, NULL);
       //  shutdown(sock, 0);
@@ -1049,49 +933,101 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
     }
 }
 
-void wifi_init_softap(void)
-{
+static int s_retry_num = 0;
+#define WIFI_CONNECTED_BIT BIT0
+#define WIFI_FAIL_BIT      BIT1
+
+static void event_handler(void* arg, esp_event_base_t event_base,int32_t event_id, void* event_data){
+    if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
+        esp_wifi_connect();
+    } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
+        is_internet_connected=false;
+        if (s_retry_num < 10) {
+            esp_wifi_connect();
+            s_retry_num++;
+            ESP_LOGI(TAG, "retry to connect to the AP");
+        } else {
+            xEventGroupSetBits(s_wifi_event_group, WIFI_FAIL_BIT);
+        }
+        ESP_LOGI(TAG,"connect to the AP fail");
+    } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
+        ip_event_got_ip_t* event = (ip_event_got_ip_t*) event_data;
+        ESP_LOGI(TAG, "got ip:" IPSTR, IP2STR(&event->ip_info.ip));
+        s_retry_num = 0;
+        is_internet_connected=true;
+        xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
+    }
+}
+
+
+static void init_dualmode_mqtt_server(void *pvParameters){
+            
+       s_wifi_event_group = xEventGroupCreate();
+
     ESP_ERROR_CHECK(esp_netif_init());
+
     ESP_ERROR_CHECK(esp_event_loop_create_default());
+    esp_netif_create_default_wifi_sta();
     esp_netif_create_default_wifi_ap();
 
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&cfg));
 
-    ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT,
-                                                        ESP_EVENT_ANY_ID,
-                                                        &wifi_event_handler,
-                                                        NULL,
-                                                        NULL));
-
-    wifi_config_t wifi_config = {
-        .ap = {
-            .ssid = EXAMPLE_ESP_WIFI_SSID,
-            .ssid_len = strlen(EXAMPLE_ESP_WIFI_SSID),
-            .channel = EXAMPLE_ESP_WIFI_CHANNEL,
-            .password = EXAMPLE_ESP_WIFI_PASS,
+    esp_event_handler_instance_t instance_any_id;
+    esp_event_handler_instance_t instance_got_ip;
+    ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT,ESP_EVENT_ANY_ID,&event_handler,NULL,&instance_any_id));
+    ESP_ERROR_CHECK(esp_event_handler_instance_register(IP_EVENT,IP_EVENT_STA_GOT_IP,&event_handler,NULL,&instance_got_ip));
+    ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT,ESP_EVENT_ANY_ID,&wifi_event_handler,NULL,NULL));
+    
+        wifi_config_t wifi_config1 = {
+            .ap = {
+            .ssid = EXAMPLE_ESP_WIFI_AP_SSID,
+            .password = EXAMPLE_ESP_WIFI_AP_PASS,
             .max_connection = EXAMPLE_MAX_STA_CONN,
-            .authmode = WIFI_AUTH_WPA_WPA2_PSK
-        },
-    };
-    if (strlen(EXAMPLE_ESP_WIFI_PASS) == 0) {
-        wifi_config.ap.authmode = WIFI_AUTH_OPEN;
-    }
+            },
+        };
 
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
-    ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_AP, &wifi_config));
+        wifi_config_t wifi_config2 = {
+            .sta = {
+                .ssid = EXAMPLE_ESP_WIFI_SSID,
+                .password = EXAMPLE_ESP_WIFI_PASS,
+            },
+        };
+    
+    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
+    ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_AP, &wifi_config1));
+    ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_STA, &wifi_config2));
     ESP_ERROR_CHECK(esp_wifi_start());
 
-    ESP_LOGI(TAG, "wifi_init_softap finished. SSID:%s password:%s channel:%d",
-             EXAMPLE_ESP_WIFI_SSID, EXAMPLE_ESP_WIFI_PASS, EXAMPLE_ESP_WIFI_CHANNEL);
-}
+    ESP_LOGI(TAG, "wifi_init finished.");
 
-/*********************************************** End wifi code   *************************************/
+    /* Waiting until either the connection is established (WIFI_CONNECTED_BIT) or connection failed for the maximum
+     * number of re-tries (WIFI_FAIL_BIT). The bits are set by event_handler() (see above) */
+    EventBits_t bits = xEventGroupWaitBits(s_wifi_event_group,WIFI_CONNECTED_BIT | WIFI_FAIL_BIT,pdFALSE,pdFALSE,portMAX_DELAY);
+
+    /* xEventGroupWaitBits() returns the bits before the call returned, hence we can test which event actually
+     * happened. */
+    if (bits & WIFI_CONNECTED_BIT) {
+        ESP_LOGI(TAG, "connected to ap SSID:%s password:%s",EXAMPLE_ESP_WIFI_AP_SSID, EXAMPLE_ESP_WIFI_AP_PASS);
+    } else if (bits & WIFI_FAIL_BIT) {
+        ESP_LOGI(TAG, "Failed to connect to SSID:%s, password:%s",EXAMPLE_ESP_WIFI_AP_SSID, EXAMPLE_ESP_WIFI_AP_PASS);
+    } else {
+        ESP_LOGE(TAG, "UNEXPECTED EVENT");
+    }
+
+    /* The event will not be processed after unregister */
+    ESP_ERROR_CHECK(esp_event_handler_instance_unregister(IP_EVENT, IP_EVENT_STA_GOT_IP, instance_got_ip));
+    ESP_ERROR_CHECK(esp_event_handler_instance_unregister(WIFI_EVENT, ESP_EVENT_ANY_ID, instance_any_id));
+    vEventGroupDelete(s_wifi_event_group);
+      //  vTaskDelay(15000 / portTICK_PERIOD_MS);
+      //  mqtt_app_start();
+
+        vTaskDelete(NULL);
+    }
 
 void app_main(void)
 {
 
-    /*************************** for wifi start *****************************************/
     //Initialize NVS
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
@@ -1099,25 +1035,9 @@ void app_main(void)
       ret = nvs_flash_init();
     }
     ESP_ERROR_CHECK(ret);
-   // ESP_ERROR_CHECK(esp_event_loop_create_default());
+   
+    xTaskCreate(init_dualmode_mqtt_server, "init_dualmode_mqtt_server", 4096, (void *)AF_INET, 5, NULL);
 
-    ESP_LOGI(TAG, "ESP_WIFI_MODE_AP");
-    wifi_init_softap();
-
-    /* This helper function configures Wi-Fi or Ethernet, as selected in menuconfig.
-     * Read "Establishing Wi-Fi or Ethernet Connection" section in
-     * examples/protocols/README.md for more information about this function.
-     */
-    //ESP_ERROR_CHECK(example_connect());
-
-    // #ifdef CONFIG_EXAMPLE_IPV4
-    //     xTaskCreate(tcp_server_task, "tcp_server", 4096, (void*)AF_INET, 5, NULL);
-    // #endif
-    // #ifdef CONFIG_EXAMPLE_IPV6
-    //     xTaskCreate(tcp_server_task, "tcp_server", 4096, (void*)AF_INET6, 5, NULL);
-    // #endif
-
-	/******************************for wifi end***************************************/
     xTaskCreate(echo_task, "uart_echo_task", 1024, NULL, 10, NULL);
 
     ESP_ERROR_CHECK(esp_bt_controller_mem_release(ESP_BT_MODE_CLASSIC_BT));
