@@ -26,6 +26,14 @@
 #include "lwip/sockets.h"
 #include "lwip/sys.h"
 #include <lwip/netdb.h>
+#include <stdint.h>
+#include <stddef.h>
+#include "freertos/semphr.h"
+#include "freertos/queue.h"
+#include "lwip/dns.h"
+#include "mqtt_client.h"
+#include "esp_wpa2.h"
+#include "esp_smartconfig.h"
 
 
 #define CONFIG_ESP_WIFI_SSID "AnandRaman"
@@ -83,7 +91,7 @@ static esp_gatt_char_prop_t b_property = 0;
 
 static bool can_send_notify = false;
 static bool is_internet_connected=false;
-
+bool is_mqtt_connected=false;
 #if (CONFIG_EXAMPLE_GATTS_NOTIFY_THROUGHPUT)
 #define GATTS_NOTIFY_LEN    490
 static SemaphoreHandle_t gatts_semaphore;
@@ -959,68 +967,145 @@ static void event_handler(void* arg, esp_event_base_t event_base,int32_t event_i
     }
 }
 
+static void esp_mqtt_publish_task(void *parm)
+{
+    int msg_id;
+    esp_mqtt_client_handle_t client = (esp_mqtt_client_handle_t) parm;
+    while (1){
+            if(is_mqtt_connected && sizeof(data_new)>0){
+                msg_id = esp_mqtt_client_publish(client, "kunjan/send",(char *) data_new, 7, 1, 1);
+                ESP_LOGI(TAG, "sent publish successful, msg_id=%d", msg_id);
+                vTaskDelay(5000 / portTICK_RATE_MS);
+            }
+        }
+        vTaskDelete(NULL);
+}
+
+static esp_err_t mqtt_event_handler_cb(esp_mqtt_event_handle_t event)
+{
+    esp_mqtt_client_handle_t client = event->client;
+    int msg_id;
+    // your_context_t *context = event->context;
+    switch (event->event_id)
+    {
+    case MQTT_EVENT_CONNECTED:
+        ESP_LOGI(TAG, "MQTT_EVENT_CONNECTED");
+        msg_id = esp_mqtt_client_subscribe(client, "kunjan/receive", 0);
+        ESP_LOGI(TAG, "sent subscribe successful, msg_id=%d", msg_id);
+        xTaskCreate(&esp_mqtt_publish_task, "esp_mqtt_publish_task", 4096,(void *) client, 3, NULL);
+        is_mqtt_connected=true;
+        break;
+    case MQTT_EVENT_DISCONNECTED:
+        is_mqtt_connected=false;
+        ESP_LOGI(TAG, "MQTT_EVENT_DISCONNECTED");
+        break;
+
+    case MQTT_EVENT_SUBSCRIBED:
+        ESP_LOGI(TAG, "MQTT_EVENT_SUBSCRIBED, msg_id=%d", event->msg_id);
+        break;
+    case MQTT_EVENT_UNSUBSCRIBED:
+        ESP_LOGI(TAG, "MQTT_EVENT_UNSUBSCRIBED, msg_id=%d", event->msg_id);
+        break;
+    case MQTT_EVENT_PUBLISHED:
+        ESP_LOGI(TAG, "MQTT_EVENT_PUBLISHED, msg_id=%d", event->msg_id);
+        break;
+    case MQTT_EVENT_DATA:
+        ESP_LOGI(TAG, "MQTT_EVENT_DATA");
+        printf("TOPIC=%.*s\r\n", event->topic_len, event->topic);
+        printf("DATA=%.*s\r\n", event->data_len, event->data);
+        uart_write_bytes(UART_NUM_1, event->data, event->data_len);
+        break;
+    case MQTT_EVENT_ERROR:
+        ESP_LOGI(TAG, "MQTT_EVENT_ERROR");
+        break;
+    default:
+        ESP_LOGI(TAG, "Other event id:%d", event->event_id);
+        break;
+    }
+    return ESP_OK;
+}
+
+static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data)
+{
+    ESP_LOGD(TAG, "Event dispatched from event loop base=%s, event_id=%d", base, event_id);
+    mqtt_event_handler_cb(event_data);
+}
+
+static void mqtt_app_start(void)
+{
+    vTaskDelay(5000 / portTICK_PERIOD_MS);
+    esp_mqtt_client_config_t mqtt_cfg = {
+        .uri = "mqtt://broker.hivemq.com:1883", //mqtt://www.maqiatto.com:1883
+        .username = "kunjanrshah@gmail.com",
+        .password = "kunjan@123"};
+
+
+    esp_mqtt_client_handle_t client = esp_mqtt_client_init(&mqtt_cfg);
+    esp_mqtt_client_register_event(client, ESP_EVENT_ANY_ID, mqtt_event_handler, client);
+    esp_mqtt_client_start(client);
+}
 
 static void init_dualmode_mqtt_server(void *pvParameters){
             
        s_wifi_event_group = xEventGroupCreate();
 
-    ESP_ERROR_CHECK(esp_netif_init());
+        ESP_ERROR_CHECK(esp_netif_init());
 
-    ESP_ERROR_CHECK(esp_event_loop_create_default());
-    esp_netif_create_default_wifi_sta();
-    esp_netif_create_default_wifi_ap();
+        ESP_ERROR_CHECK(esp_event_loop_create_default());
+        esp_netif_create_default_wifi_sta();
+        esp_netif_create_default_wifi_ap();
 
-    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
+        wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+        ESP_ERROR_CHECK(esp_wifi_init(&cfg));
 
-    esp_event_handler_instance_t instance_any_id;
-    esp_event_handler_instance_t instance_got_ip;
-    ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT,ESP_EVENT_ANY_ID,&event_handler,NULL,&instance_any_id));
-    ESP_ERROR_CHECK(esp_event_handler_instance_register(IP_EVENT,IP_EVENT_STA_GOT_IP,&event_handler,NULL,&instance_got_ip));
-    ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT,ESP_EVENT_ANY_ID,&wifi_event_handler,NULL,NULL));
-    
-        wifi_config_t wifi_config1 = {
-            .ap = {
-            .ssid = EXAMPLE_ESP_WIFI_AP_SSID,
-            .password = EXAMPLE_ESP_WIFI_AP_PASS,
-            .max_connection = EXAMPLE_MAX_STA_CONN,
-            },
-        };
+        esp_event_handler_instance_t instance_any_id;
+        esp_event_handler_instance_t instance_got_ip;
+        ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT,ESP_EVENT_ANY_ID,&event_handler,NULL,&instance_any_id));
+        ESP_ERROR_CHECK(esp_event_handler_instance_register(IP_EVENT,IP_EVENT_STA_GOT_IP,&event_handler,NULL,&instance_got_ip));
+        ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT,ESP_EVENT_ANY_ID,&wifi_event_handler,NULL,NULL));
+        
+            wifi_config_t wifi_config1 = {
+                .ap = {
+                .ssid = EXAMPLE_ESP_WIFI_AP_SSID,
+                .password = EXAMPLE_ESP_WIFI_AP_PASS,
+                .max_connection = EXAMPLE_MAX_STA_CONN,
+                },
+            };
 
-        wifi_config_t wifi_config2 = {
-            .sta = {
-                .ssid = EXAMPLE_ESP_WIFI_SSID,
-                .password = EXAMPLE_ESP_WIFI_PASS,
-            },
-        };
-    
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
-    ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_AP, &wifi_config1));
-    ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_STA, &wifi_config2));
-    ESP_ERROR_CHECK(esp_wifi_start());
+            wifi_config_t wifi_config2 = {
+                .sta = {
+                    .ssid = EXAMPLE_ESP_WIFI_SSID,
+                    .password = EXAMPLE_ESP_WIFI_PASS,
+                },
+            };
+        
+        ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
+        ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_AP, &wifi_config1));
+        ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_STA, &wifi_config2));
+        ESP_ERROR_CHECK(esp_wifi_start());
 
-    ESP_LOGI(TAG, "wifi_init finished.");
+        ESP_LOGI(TAG, "wifi_init finished.");
 
-    /* Waiting until either the connection is established (WIFI_CONNECTED_BIT) or connection failed for the maximum
-     * number of re-tries (WIFI_FAIL_BIT). The bits are set by event_handler() (see above) */
-    EventBits_t bits = xEventGroupWaitBits(s_wifi_event_group,WIFI_CONNECTED_BIT | WIFI_FAIL_BIT,pdFALSE,pdFALSE,portMAX_DELAY);
+        /* Waiting until either the connection is established (WIFI_CONNECTED_BIT) or connection failed for the maximum
+        * number of re-tries (WIFI_FAIL_BIT). The bits are set by event_handler() (see above) */
+        EventBits_t bits = xEventGroupWaitBits(s_wifi_event_group,WIFI_CONNECTED_BIT | WIFI_FAIL_BIT,pdFALSE,pdFALSE,portMAX_DELAY);
 
-    /* xEventGroupWaitBits() returns the bits before the call returned, hence we can test which event actually
-     * happened. */
-    if (bits & WIFI_CONNECTED_BIT) {
-        ESP_LOGI(TAG, "connected to ap SSID:%s password:%s",EXAMPLE_ESP_WIFI_AP_SSID, EXAMPLE_ESP_WIFI_AP_PASS);
-    } else if (bits & WIFI_FAIL_BIT) {
-        ESP_LOGI(TAG, "Failed to connect to SSID:%s, password:%s",EXAMPLE_ESP_WIFI_AP_SSID, EXAMPLE_ESP_WIFI_AP_PASS);
-    } else {
-        ESP_LOGE(TAG, "UNEXPECTED EVENT");
-    }
+        /* xEventGroupWaitBits() returns the bits before the call returned, hence we can test which event actually
+        * happened. */
+        if (bits & WIFI_CONNECTED_BIT) {
+            ESP_LOGI(TAG, "connected to ap SSID:%s password:%s",EXAMPLE_ESP_WIFI_AP_SSID, EXAMPLE_ESP_WIFI_AP_PASS);
+        } else if (bits & WIFI_FAIL_BIT) {
+            ESP_LOGI(TAG, "Failed to connect to SSID:%s, password:%s",EXAMPLE_ESP_WIFI_AP_SSID, EXAMPLE_ESP_WIFI_AP_PASS);
+        } else {
+            ESP_LOGE(TAG, "UNEXPECTED EVENT");
+        }
 
     /* The event will not be processed after unregister */
-    ESP_ERROR_CHECK(esp_event_handler_instance_unregister(IP_EVENT, IP_EVENT_STA_GOT_IP, instance_got_ip));
-    ESP_ERROR_CHECK(esp_event_handler_instance_unregister(WIFI_EVENT, ESP_EVENT_ANY_ID, instance_any_id));
-    vEventGroupDelete(s_wifi_event_group);
+        ESP_ERROR_CHECK(esp_event_handler_instance_unregister(IP_EVENT, IP_EVENT_STA_GOT_IP, instance_got_ip));
+        ESP_ERROR_CHECK(esp_event_handler_instance_unregister(WIFI_EVENT, ESP_EVENT_ANY_ID, instance_any_id));
+        vEventGroupDelete(s_wifi_event_group);
       //  vTaskDelay(15000 / portTICK_PERIOD_MS);
-      //  mqtt_app_start();
+        mqtt_app_start();
 
         vTaskDelete(NULL);
     }
