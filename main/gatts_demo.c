@@ -798,7 +798,7 @@ static void send_task(void *pvParameters)
     int sock = (int)pvParameters;
     while (sizeof(data_new) > 0 && is_connected==1)
     {
-        vTaskDelay(500 / portTICK_RATE_MS);
+        vTaskDelay(2000 / portTICK_RATE_MS);
 //        ESP_LOGE(TAG, "kunjan... %p", (void*)data_new);
 
         int written = send(sock,(char *) data_new, 7, 0);
