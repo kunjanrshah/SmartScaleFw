@@ -35,11 +35,21 @@
 #include "esp_wpa2.h"
 #include "esp_smartconfig.h"
 
+#include <sys/unistd.h>
+#include <sys/stat.h>
+#include "esp_err.h"
+#include "esp_spiffs.h"
+
+
+//#define TEST_DEVICE_NAME "Superb-01"
+char *ble_name="Superb-01";
+char *mqtt_ssid="AnandRaman";
+char *mqtt_pass="kunjan@123";
 
 #define CONFIG_ESP_WIFI_SSID "AnandRaman"
 #define CONFIG_ESP_WIFI_PASSWORD "kunjan@123"
 #define EXAMPLE_ESP_WIFI_AP_SSID   "SuperbScale"   
-#define EXAMPLE_ESP_WIFI_AP_PASS   "superb@123"
+#define EXAMPLE_ESP_WIFI_AP_PASS   "123456"
 
 #define CONFIG_ESP_MAX_STA_CONN 10
 #define EXAMPLE_ESP_WIFI_SSID      CONFIG_ESP_WIFI_SSID
@@ -76,7 +86,6 @@ static void gatts_profile_b_event_handler(esp_gatts_cb_event_t event, esp_gatt_i
 #define GATTS_DESCR_UUID_TEST_B     0x2222
 #define GATTS_NUM_HANDLE_TEST_B     4
 
-#define TEST_DEVICE_NAME            "Superb-01"
 #define TEST_MANUFACTURER_DATA_LEN  17
 
 #define GATTS_DEMO_CHAR_VAL_LEN_MAX 0x40
@@ -85,6 +94,11 @@ static void gatts_profile_b_event_handler(esp_gatts_cb_event_t event, esp_gatt_i
 
 static uint8_t char1_str[] = {0x11,0x22,0x33};
 uint8_t *data_new = NULL;
+
+#define ROW 10
+#define COL  20
+
+char ArrayOfString[ROW][COL];
 
 static esp_gatt_char_prop_t a_property = 0;
 static esp_gatt_char_prop_t b_property = 0;
@@ -342,15 +356,17 @@ void example_exec_write_event_env(prepare_type_env_t *prepare_write_env, esp_ble
 static void gatts_profile_a_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_ble_gatts_cb_param_t *param) {
     switch (event) {
     case ESP_GATTS_REG_EVT:
-        ESP_LOGI(GATTS_TAG, "REGISTER_APP_EVT, status %d, app_id %d\n", param->reg.status, param->reg.app_id);
+        ESP_LOGE(GATTS_TAG, "REGISTER_APP_EVT, status %d, app_id %d\n", param->reg.status, param->reg.app_id);
         gl_profile_tab[PROFILE_A_APP_ID].service_id.is_primary = true;
         gl_profile_tab[PROFILE_A_APP_ID].service_id.id.inst_id = 0x00;
         gl_profile_tab[PROFILE_A_APP_ID].service_id.id.uuid.len = ESP_UUID_LEN_16;
         gl_profile_tab[PROFILE_A_APP_ID].service_id.id.uuid.uuid.uuid16 = GATTS_SERVICE_UUID_TEST_A;
 
-        esp_err_t set_dev_name_ret = esp_ble_gap_set_device_name(TEST_DEVICE_NAME);
+        esp_err_t set_dev_name_ret = esp_ble_gap_set_device_name(ble_name);
         if (set_dev_name_ret){
             ESP_LOGE(GATTS_TAG, "set device name failed, error code = %x", set_dev_name_ret);
+        }else{
+            ESP_LOGE(GATTS_TAG, "set device name %s SUCCESS DEFALUT ",ble_name);
         }
 #ifdef CONFIG_SET_RAW_ADV_DATA
         esp_err_t raw_adv_ret = esp_ble_gap_config_adv_data_raw(raw_adv_data, sizeof(raw_adv_data));
@@ -395,8 +411,7 @@ static void gatts_profile_a_event_handler(esp_gatts_cb_event_t event, esp_gatt_i
 		rsp.attr_value.value[6] = data_new[6];
 
         // write data to ble rsp *******************
-        esp_ble_gatts_send_response(gatts_if, param->read.conn_id, param->read.trans_id,
-                                    ESP_GATT_OK, &rsp);
+        esp_ble_gatts_send_response(gatts_if, param->read.conn_id, param->read.trans_id,ESP_GATT_OK, &rsp);
         break;
     }
     case ESP_GATTS_WRITE_EVT: {
@@ -406,9 +421,29 @@ static void gatts_profile_a_event_handler(esp_gatts_cb_event_t event, esp_gatt_i
             esp_log_buffer_hex(GATTS_TAG, param->write.value, param->write.len);
 
            // (const char*)sendchar = param->write.value;  //ESP_LOGI(GATTS_TAG, "notify Done");// for test debg.
-
-            uart_write_bytes(UART_NUM_1, (const char *)param->write.value, param->write.len);
-
+            if(param->write.len < 5){
+                uart_write_bytes(UART_NUM_1, (const char *)param->write.value, param->write.len);
+            }else{
+               // TEST_DEVICE_NAME=(const char *)param->write.value;
+                esp_err_t set_dev_name_ret = esp_ble_gap_set_device_name((const char *)param->write.value);
+                if (set_dev_name_ret){
+                        ESP_LOGE(GATTS_TAG, "set device name failed, error code = %x", set_dev_name_ret);
+                }else{
+                    // First create a file.
+                    ESP_LOGI(TAG, "Opening file");
+                    FILE* f = fopen("/spiffs/ble_name.txt", "w");
+                    if (f == NULL) {
+                        ESP_LOGE(TAG, "Failed to open file for writing");
+                        return;
+                    }
+                    ESP_LOGI(GATTS_TAG, "Write BLE Name: %s ",(const char *) (param->write.value));
+                    fprintf(f, (const char *)(param->write.value));
+                    fclose(f);
+                    ESP_LOGI(TAG, "File written");
+                    ESP_LOGE(GATTS_TAG, "Save device name SUCCESS");
+                }
+            }
+            
             if (gl_profile_tab[PROFILE_A_APP_ID].descr_handle == param->write.handle && param->write.len == 2){
                 uint16_t descr_value = param->write.value[1]<<8 | param->write.value[0];
                 if (descr_value == 0x0001){
@@ -556,7 +591,7 @@ static void gatts_profile_a_event_handler(esp_gatts_cb_event_t event, esp_gatt_i
         esp_ble_gap_start_advertising(&adv_params);
         break;
     case ESP_GATTS_CONF_EVT:
-        ESP_LOGI(GATTS_TAG, "ESP_GATTS_CONF_EVT, status %d attr_handle %d", param->conf.status, param->conf.handle);
+      //  ESP_LOGI(GATTS_TAG, "ESP_GATTS_CONF_EVT, status %d attr_handle %d", param->conf.status, param->conf.handle);
         if (param->conf.status != ESP_GATT_OK){
             esp_log_buffer_hex(GATTS_TAG, param->conf.value, param->conf.len);
         }
@@ -749,6 +784,26 @@ static void gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_
  uint8_t *data_new;
  static void echo_task(void *arg)
 {
+    ESP_LOGI(TAG, "Reading file");
+    FILE* f1 = fopen("/spiffs/ble_name.txt", "r");
+    if (f1 == NULL) {
+        ESP_LOGE(TAG, "Failed to open file for reading");
+    }else{
+        char line[60];
+        fgets(line, sizeof(line), f1);
+        fclose(f1);
+        // strip newline
+        char* pos = strchr(line, '\n');
+        if (pos) {
+            *pos = '\0';
+        }
+        
+        if(sizeof(line)>0){
+            ble_name=line;
+            ESP_LOGI(TAG, "Read from BLE file: '%s' and size: %d", ble_name,sizeof(ble_name));
+        }
+    }
+
     /* Configure parameters of an UART driver,
      * communication pins and install the driver */
     uart_config_t uart_config = {
@@ -835,8 +890,26 @@ static void receive_task(void *pvParameters)
         else
         {
             rx_buffer[len] = 0; // Null-terminate whatever is received and treat it like a string
-            ESP_LOGI(TAG, "Received %d bytes: %s", len, rx_buffer);
-            uart_write_bytes(UART_NUM_1, rx_buffer, 2);
+          //  ESP_LOGI(TAG, "Received %d bytes: %s", len, rx_buffer);
+
+            if(len>2){
+                ESP_LOGI(TAG, "Opening file");
+                    FILE* f1 = fopen("/spiffs/wifi_admin.txt", "w");
+                     if (f1 == NULL) {
+                        ESP_LOGE(TAG, "Failed to open file for writing");
+                        return;
+                    }
+
+                    ESP_LOGI(TAG, "rx_buffer Received %d bytes: %s", len, rx_buffer);
+                    fprintf(f1,(const char *) rx_buffer);
+                    fclose(f1);
+                    ESP_LOGI(TAG, "Save device wifi credentials");
+                        
+            }else{
+                uart_write_bytes(UART_NUM_1, rx_buffer, 2);
+            }
+            
+            
         }
     } while (len > 0);
      vTaskDelete(NULL);
@@ -914,7 +987,7 @@ static void tcp_server_task(void *pvParameters)
         ESP_LOGI(TAG, "Socket accepted ip address: %s", addr_str);
 
         xTaskCreate(&send_task, "send_task", 2048, (void *)sock, 4, NULL);
-        xTaskCreate(&receive_task, "receive_task", 2048, (void *)sock, 4, NULL);
+        xTaskCreate(&receive_task, "receive_task", 4096, (void *)sock, 4, NULL);
       //  shutdown(sock, 0);
       //  close(sock);
     }
@@ -1046,8 +1119,8 @@ static void mqtt_app_start(void)
 }
 
 static void init_dualmode_mqtt_server(void *pvParameters){
-            
-       s_wifi_event_group = xEventGroupCreate();
+
+        s_wifi_event_group = xEventGroupCreate();
 
         ESP_ERROR_CHECK(esp_netif_init());
 
@@ -1074,11 +1147,19 @@ static void init_dualmode_mqtt_server(void *pvParameters){
 
             wifi_config_t wifi_config2 = {
                 .sta = {
-                    .ssid = EXAMPLE_ESP_WIFI_SSID,
-                    .password = EXAMPLE_ESP_WIFI_PASS,
+                    .ssid = {0},
+                    .password = {0},
                 },
             };
         
+        for(int i=0; i<strlen(mqtt_ssid); i++){
+            wifi_config2.sta.ssid[i]=mqtt_ssid[i];
+        }
+        for(int i=0; i<strlen(mqtt_pass); i++){
+            wifi_config2.sta.password[i]=mqtt_pass[i];
+        }
+        
+
         ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
         ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_AP, &wifi_config1));
         ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_STA, &wifi_config2));
@@ -1110,9 +1191,23 @@ static void init_dualmode_mqtt_server(void *pvParameters){
         vTaskDelete(NULL);
     }
 
+    size_t vSeparateSringByComma (char* string)
+{
+    const char *delims = ",\n";
+    char *s = string;
+    size_t n = 0, len;
+
+    for (s = strtok (s, delims); s && n < ROW; s = strtok (NULL, delims))
+        if ((len = strlen (s)) < COL)
+            strcpy (ArrayOfString[n++], s);
+        else
+            fprintf (stderr, "error: '%s' exceeds COL - 1 chars.\n", s);
+
+    return n;
+}
+
 void app_main(void)
 {
-
     //Initialize NVS
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
@@ -1120,10 +1215,73 @@ void app_main(void)
       ret = nvs_flash_init();
     }
     ESP_ERROR_CHECK(ret);
-   
+
+    ESP_LOGI(TAG, "Initializing SPIFFS");
+    esp_vfs_spiffs_conf_t conf = {
+      .base_path = "/spiffs",
+      .partition_label = NULL,
+      .max_files = 5,
+      .format_if_mount_failed = true
+    };
+
+    // Use settings defined above to initialize and mount SPIFFS filesystem.
+    // Note: esp_vfs_spiffs_register is an all-in-one convenience function.
+    ret = esp_vfs_spiffs_register(&conf);
+
+    if (ret != ESP_OK) {
+        if (ret == ESP_FAIL) {
+            ESP_LOGE(TAG, "Failed to mount or format filesystem");
+        } else if (ret == ESP_ERR_NOT_FOUND) {
+            ESP_LOGE(TAG, "Failed to find SPIFFS partition");
+        } else {
+            ESP_LOGE(TAG, "Failed to initialize SPIFFS (%s)", esp_err_to_name(ret));
+        }
+        return;
+    }
+
+    size_t total = 0, used = 0;
+    ret = esp_spiffs_info(conf.partition_label, &total, &used);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to get SPIFFS partition information (%s)", esp_err_to_name(ret));
+    } else {
+        ESP_LOGI(TAG, "Partition size: total: %d, used: %d", total, used);
+    }
+
+    ESP_LOGI(TAG, "Reading file");
+    FILE* f = fopen("/spiffs/wifi_admin.txt", "r");
+    if (f == NULL) {
+        ESP_LOGE(TAG, "Failed to open file for reading");
+    }else{
+       
+        char line1[70];
+        fgets(line1, sizeof(line1), f);
+        fclose(f);
+        // strip newline
+        char* pos = strchr(line1, '\n');
+        if (pos) {
+            *pos = '\0';
+        }
+       
+        size_t n = vSeparateSringByComma (line1);             
+        for (size_t i = 0; i < n; i++){
+            
+            char* str=ArrayOfString[i];
+            if(strcmp(str, "")!=0){
+                if(i==0){
+                    mqtt_ssid=str;
+                    printf ("mqtt_ssid : '%s'\n", mqtt_ssid);
+                }else if(i==1){
+                    mqtt_pass=str;
+                    printf ("mqtt_pass : '%s'\n", mqtt_pass);
+                }
+            }
+            printf ("ArrayOfString[%zu] : '%s'\n", i, ArrayOfString[i]);
+        }
+    }
+
     xTaskCreate(init_dualmode_mqtt_server, "init_dualmode_mqtt_server", 4096, (void *)AF_INET, 5, NULL);
 
-    xTaskCreate(echo_task, "uart_echo_task", 1024, NULL, 10, NULL);
+    xTaskCreate(echo_task, "uart_echo_task", 2048, NULL, 10, NULL);
 
     ESP_ERROR_CHECK(esp_bt_controller_mem_release(ESP_BT_MODE_CLASSIC_BT));
 
