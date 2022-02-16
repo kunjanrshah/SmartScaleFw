@@ -46,7 +46,7 @@ static uint8_t device_mac_addr[6] = {0};
 static uint8_t s_example_broadcast_mac[ESP_NOW_ETH_ALEN] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 static uint8_t rx_cmd[] = {0x0, 0x00}; //{0};
 static uint8_t *store_status = {0};
-static int n_status=21;
+static int n_status=25;
 static bool is_internet_connected=false;
 static bool save_status = false;
 static void example_espnow_deinit(example_espnow_send_param_t *send_param);
@@ -389,6 +389,7 @@ void example_espnow_data_prepare(example_espnow_send_param_t *send_param)
                 buf->seq_status[i] = dev_id;
                 buf->seq_status[++i] = 253;
                 buf->seq_status[++i] = 254;
+                buf->seq_status[++i] = 255;
                 buf->seq_status[++i] = ESPNOW_SWITCH;
                 if (rx_cmd[0] == ESPNOW_DEVICE_ID)
                 {
@@ -408,6 +409,7 @@ void example_espnow_data_prepare(example_espnow_send_param_t *send_param)
                 buf->seq_status[i] = dev_id;
                 buf->seq_status[++i] = 253;
                 buf->seq_status[++i] = 254;
+                buf->seq_status[++i] = 255;
                 buf->seq_status[++i] = 0;
                 buf->seq_status[++i] = 0;
             }
@@ -437,18 +439,19 @@ void example_espnow_data_prepare(example_espnow_send_param_t *send_param)
         }
         buf->seq_status[0] = connected;
 
-        for (int i = 1; i < n_status; i = i + 5)
+        for (int i = 1; i < n_status; i = i + 6)
         {
             if (buf->seq_status[i] == ESPNOW_DEVICE_ID)
             {
                 buf->seq_status[i + 1] = 253;
                 buf->seq_status[i + 2] = 254;
-                buf->seq_status[i + 3] = ESPNOW_SWITCH;
+                buf->seq_status[i + 3] = 255;
+                buf->seq_status[i + 4] = ESPNOW_SWITCH;
                 if (send_param->seq_cmd[0] == ESPNOW_DEVICE_ID || rx_cmd[0] == ESPNOW_DEVICE_ID)
                 {
                     if (rx_cmd[0] == ESPNOW_DEVICE_ID)
                     {
-                        buf->seq_status[i + 4] = rx_cmd[1];
+                        buf->seq_status[i + 5] = rx_cmd[1];
                         for (int j = 0; j < 2; j++)
                         {
                             rx_cmd[j] = 0;
@@ -457,7 +460,7 @@ void example_espnow_data_prepare(example_espnow_send_param_t *send_param)
                     }
                     else if (send_param->seq_cmd[0] == ESPNOW_DEVICE_ID)
                     {
-                        buf->seq_status[i + 4] = send_param->seq_cmd[1];
+                        buf->seq_status[i + 5] = send_param->seq_cmd[1];
                         for (int j = 0; j < 2; j++)
                         {
                             send_param->seq_cmd[j] = 0;
@@ -467,7 +470,7 @@ void example_espnow_data_prepare(example_espnow_send_param_t *send_param)
                 }
                 else
                 { 
-                    buf->seq_status[i + 4] = store_status[i + 4];
+                    buf->seq_status[i + 5] = store_status[i + 5];
                     if (rx_cmd[0] != 0)
                     {
                         send_param->seq_cmd[0] = rx_cmd[0];
@@ -484,7 +487,7 @@ void example_espnow_data_prepare(example_espnow_send_param_t *send_param)
             {
                 if (rx_cmd[0] == buf->seq_status[i]) //if (rx_cmd[0] == i)
                 {
-                    if (rx_cmd[1] == buf->seq_status[i + 4])
+                    if (rx_cmd[1] == buf->seq_status[i + 5])
                     {
                         for (int j = 0; j < 2; j++)
                         {
@@ -497,83 +500,83 @@ void example_espnow_data_prepare(example_espnow_send_param_t *send_param)
         }
     }
 
-    for (int i = 0; i < n_status; i++)
-    {
-        ESP_LOGI(TAG, "%d, %d",store_status[i],buf->seq_status[i]);
-    }
+    // for (int i = 0; i < n_status; i++)
+    // {
+    //     ESP_LOGI(TAG, "%d, %d",store_status[i],buf->seq_status[i]);
+    // }
 
     save_status = false;
-    if(is_internet_connected){
-        bool is_diff=true;
+    //if(is_internet_connected){
+        // bool is_diff=true;
         // uint8_t *send_units={0};
-        bool is_diff_key=true;
-        uint8_t *send_keys={0};
+        // bool is_diff_key=true;
+        // uint8_t *send_keys={0};
         
-        buf->seq_status[5]=5;
-        buf->seq_status[10]=15;
-        buf->seq_status[15]=33;
-        buf->seq_status[20]=14;
+        // buf->seq_status[6]=5;
+        // buf->seq_status[12]=15;
+        // buf->seq_status[18]=33;
+        // buf->seq_status[24]=14;
 
-        for (int i = 2,j=-1,k=5,x=-1; i < n_status; i=i+5,k=k+5)
-        {
-            // if(store_status[i] != buf->seq_status[i]){
-            //     if(is_diff){
-            //         is_diff=false;
-            //         send_units =(uint8_t *) calloc(8, sizeof(uint8_t));   
-            //     }     
-            //     send_units[++j]=buf->seq_status[i-1];
-            //     send_units[++j]=buf->seq_status[i];
-            // }
+        // for (int i = 2,j=-1,k=6,x=-1; i < n_status; i=i+6,k=k+6)
+        // {
+        //     if(store_status[i] != buf->seq_status[i]){
+        //         if(is_diff){
+        //             is_diff=false;
+        //             send_units =(uint8_t *) calloc(8, sizeof(uint8_t));   
+        //         }     
+        //         send_units[++j]=buf->seq_status[i-1];
+        //         send_units[++j]=buf->seq_status[i];
+        //     }
             
-            if(store_status[k] != buf->seq_status[k]){
-                if(is_diff_key){
-                    is_diff_key=false;
-                    send_keys =(uint8_t *) calloc(40, sizeof(uint8_t));   
-                }   
+        //     if(store_status[k] != buf->seq_status[k]){
+        //         if(is_diff_key){
+        //             is_diff_key=false;
+        //             send_keys =(uint8_t *) calloc(40, sizeof(uint8_t));   
+        //         }   
 
-                send_keys[++x]=buf->seq_status[k-4];
-                for(int y=1; y<5; y++){
+        //         send_keys[++x]=buf->seq_status[k-4];
+        //         for(int y=1; y<5; y++){
 
-                    ESP_LOGI(TAG, "get store_status Bit %d",getBit(store_status[k],y-1));
-                    ESP_LOGI(TAG, "get buf status: %d",getBit(buf->seq_status[k],y-1));                    
+        //             ESP_LOGI(TAG, "get store_status Bit %d",getBit(store_status[k],y-1));
+        //             ESP_LOGI(TAG, "get buf status: %d",getBit(buf->seq_status[k],y-1));                    
                     
-                       if(getBit(store_status[k],y-1)!=getBit(buf->seq_status[k],y-1)){
-                        send_keys[++x]=y;
-                        send_keys[++x]=getBit(buf->seq_status[k],y-1);
-                       }else{
-                        send_keys[++x]=0;
-                        send_keys[++x]=0;
-                       } 
-                }                
-            }
-        }
+        //                if(getBit(store_status[k],y-1)!=getBit(buf->seq_status[k],y-1)){
+        //                 send_keys[++x]=y;
+        //                 send_keys[++x]=getBit(buf->seq_status[k],y-1);
+        //                }else{
+        //                 send_keys[++x]=0;
+        //                 send_keys[++x]=0;
+        //                } 
+        //         }                
+        //     }
+        // }
         // if(is_diff ==false || is_diff_key==false){
         //         save_status = true;
         // }
            
-        for (int i = 0; i < 20; i++)
-        {
-                ESP_LOGI(TAG, "send_keys %d",send_keys[i]);
-        }   
+        // for (int i = 0; i < 20; i++)
+        // {
+        //         ESP_LOGI(TAG, "send_keys %d",send_keys[i]);
+        // }   
         // if(!is_diff){
         //     //POST Call request param -> device_id,units
         //     xTaskCreate(http_store_unit_task, "http_store_unit_task", 8192, send_units, 5, NULL);
         // }
-        if(!is_diff_key){
-            //POST Call request param -> swtich_id,status
-            xTaskCreate(http_store_keys_task, "http_store_keys_task", 8192, send_keys, 5, NULL);
-        }
+        // if(!is_diff_key){
+        //     //POST Call request param -> swtich_id,status
+        //     xTaskCreate(http_store_keys_task, "http_store_keys_task", 8192, send_keys, 5, NULL);
+        // }
         
-    }else{
+    //}else{
             for (int i = 0; i < n_status; i++)
             {
                 if (store_status[i] != buf->seq_status[i])
                 {
-                   // save_status = true;
+                    save_status = true;
                     break;
                 }
             }
-     }
+     //}
     
     if (save_status)
     {
@@ -848,7 +851,7 @@ static void init_station_mqtt_server(void *pvParameters)
 
             vTaskDelay(15000 / portTICK_PERIOD_MS);
             example_espnow_init(0,EXAMPLE_ESP_WIFI_CHANNEL);
-            //mqtt_app_start();
+            mqtt_app_start();
         }
     }
     vTaskDelete(NULL);

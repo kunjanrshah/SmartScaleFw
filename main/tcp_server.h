@@ -88,7 +88,7 @@ static void esp_receive_task(void *pvParameters)
 static void esp_send_task(void *pvParameters)
 {
     int sock = (int)pvParameters;
-    char tx_buffer[50] = "";
+    char tx_buffer[70] = "";
     char *a = (char *)malloc(3);
 
     while (1)

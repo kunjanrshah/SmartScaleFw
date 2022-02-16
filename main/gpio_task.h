@@ -52,15 +52,16 @@ static void echo_task(void *arg)
     char amps[5] =  {'0','0','0','0','\0'};
 
     vTaskDelay(10000 / portTICK_PERIOD_MS);
-    int switch_pos=0,units_pos=0,kwatt_pos=0;
+    int switch_pos=0,units_pos=0,kwatt_pos=0,amp_pos=0;
 
-    for (int i = 1; i < n_status; i = i + 5)
+    for (int i = 1; i < n_status; i = i + 6)
         {
             if (store_status[i] == ESPNOW_DEVICE_ID)
             {
                 units_pos=i+1;
                 kwatt_pos=i+2;  
-                switch_pos=i+4;
+                amp_pos=i+3;
+                switch_pos=i+5;
                 break;
             }
         }
@@ -107,7 +108,9 @@ static void echo_task(void *arg)
             sscanf(amps, "%d", &amp_val);
 
             printf("switch_val: %d , unit_val: %d, kwatts_val: %d , amp_val: %d \n", switch_val, unit_val,kwatts_val, amp_val);
-            store_status[kwatt_pos]=kwatts_val;  
+            store_status[kwatt_pos]=kwatts_val;
+            store_status[amp_pos]=amp_val; 
+            
             saved_data= getMS51StatusFromMemory();
             
             saved_switches_arr[0]= (char) saved_data[0];
@@ -154,11 +157,11 @@ static void do_operation()
             storeStatusToMemory();
         }
 
-        for (int i = 1; i < n_status; i = i + 5)
+        for (int i = 1; i < n_status; i = i + 6)
         {
             if (store_status[i] == ESPNOW_DEVICE_ID)
             {
-                state = store_status[i + 4];
+                state = store_status[i + 5];
                 break;
             }
         }
@@ -190,7 +193,7 @@ void gpio_init()
     //configure GPIO with the given settings
     gpio_config(&io_conf);
 
-  //  xTaskCreate(echo_task, "uart_echo_task", 4096, NULL, 10, NULL);
+   // xTaskCreate(echo_task, "uart_echo_task", 4096, NULL, 10, NULL);
 
 }
 
