@@ -20,8 +20,8 @@
 #endif
 
 
-#define CONFIG_ESP_WIFI_SSID "ssid2"
-#define CONFIG_ESP_WIFI_PASSWORD "password2"
+#define CONFIG_ESP_WIFI_SSID "ssid1"
+#define CONFIG_ESP_WIFI_PASSWORD "password1"
 #define CONFIG_ESP_WIFI_CHANNEL 0
 #define CONFIG_ESP_MAX_STA_CONN 4
 #define CONFIG_EXAMPLE_PORT 3333
